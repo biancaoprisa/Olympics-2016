@@ -1,0 +1,251 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+library(ggplot2)
+library(GGally)
+library(pscl)
+library(lmtest)
+library(MASS)
+library(car)
+
+oldat <- read.csv(url("http://www.stats.gla.ac.uk/~tereza/rp/rioolympics.csv"))
+str(oldat)
+
+oldat$gdp00 <- as.integer(as.character(oldat$gdp00))
+oldat$gdp16 <- as.integer(as.character(oldat$gdp16))
+
+oldat$gdp00[is.na(oldat$gdp00)] = mean(oldat$gdp00, na.rm=T)
+oldat$gdp16[is.na(oldat$gdp16)] = mean(oldat$gdp16, na.rm=T)
+
+#soviet, comm, oneparty, muslim and host are coded as integers. I will be coding them as factors with two levels. 
+oldat$soviet <- as.factor(oldat$soviet)
+oldat$comm <- as.factor(oldat$comm)
+oldat$oneparty <- as.factor(oldat$oneparty)
+oldat$host <- as.factor(oldat$host)
+oldat$muslim <- as.factor(oldat$muslim)
+
+#Creating a data frame containing the data from the 2012 Olympics. This will be used for variable selection.
+olympics12 <- data.frame(country = oldat$country,
+                         gdp = oldat$gdp12,
+                         population = oldat$pop12,
+                         soviet = oldat$soviet,
+                         comm = oldat$comm,
+                         muslim = oldat$muslim,
+                         oneparty = oldat$oneparty,
+                         medals = oldat$tot12,
+                         altitude = oldat$altitude,
+                         athletes = oldat$athletes12,
+                         host = oldat$host)
+olympics12$GDPpercapita <- olympics12$gdp / olympics12$population
+olympics12$GDPpercapita <- as.numeric(olympics12$GDPpercapita)
+
+#Creating the dataset which I will use for training the model.
+training.data <- oldat[, c(-7, -12, -17:-21, -26:-36, -42)]
+str(training.data)
+
+training.data$GDPpercapita00 <- training.data$gdp00 / training.data$pop00
+training.data$GDPpercapita04 <- training.data$gdp04 / training.data$pop04
+training.data$GDPpercapita08 <- training.data$gdp08 / training.data$pop08
+training.data$GDPpercapita12 <- training.data$gdp12 / training.data$pop12
+
+names(training.data)[names(training.data) == "GDPpercapita00"] <- "GDPpercapita"
+names(training.data)[names(training.data) == "GDPpercapita04"] <- "GDPpercapita"
+names(training.data)[names(training.data) == "GDPpercapita08"] <- "GDPpercapita"
+names(training.data)[names(training.data) == "GDPpercapita12"] <- "GDPpercapita"
+
+names(training.data)[names(training.data) == "pop00"] <- "population"
+names(training.data)[names(training.data) == "pop04"] <- "population"
+names(training.data)[names(training.data) == "pop08"] <- "population"
+names(training.data)[names(training.data) == "pop12"] <- "population"
+
+names(training.data)[names(training.data) == "tot00"] <- "medals"
+names(training.data)[names(training.data) == "tot04"] <- "medals"
+names(training.data)[names(training.data) == "tot08"] <- "medals"
+names(training.data)[names(training.data) == "tot12"] <- "medals"
+
+names(training.data)[names(training.data) == "athletes00"] <- "athletes"
+names(training.data)[names(training.data) == "athletes04"] <- "athletes"
+names(training.data)[names(training.data) == "athletes08"] <- "athletes"
+names(training.data)[names(training.data) == "athletes12"] <- "athletes"
+
+#Creating the dataset that will be used for testing the model.
+olympics16 <-  data.frame(country = oldat$country,
+                          gdp = oldat$gdp16,
+                          population = oldat$pop16,
+                          soviet = olympics12$soviet,
+                          comm = olympics12$comm,
+                          muslim = olympics12$muslim,
+                          oneparty = olympics12$oneparty,
+                          medals = oldat$tot16,
+                          altitude = oldat$altitude,
+                          athletes = oldat$athletes16,
+                          host = olympics12$host)
+
+olympics16$GDPpercapita <- olympics16$gdp / olympics16$population
+
+str(olympics16)
+
+#Exploratory analysis
+str(olympics12) 
+
+summary(olympics12)
+
+ggpairs(olympics12[,c(-1,-2)],
+        upper=list(continuous=wrap("points", alpha=0.4)),
+        lower="blank", axisLabels="none")
+#From the plots there seems to be a positive linear relationship between athletes and medals, host and medals, oneparty and medals, GDPpercapita and medals and possibly between population and medals. 
+#There also seems to be a positive linear realtionship between athletes and GDPpercapita, athletes and host,
+#athletes and oneparty and host and GDPpercapita; also between oneparty and population.
+#There is a negative linear relationship between GDPper capita and soviet, GDPpercapita and muslim, GDP per capita and comm;
+
+#GDPpercapita, population and athletes might need to be log transformed due to the wide range of values.
+
+
+
+p1 <- ggplot(olympics12, aes(x=log(GDPpercapita), y=log(medals))) +
+               geom_point(col="#f46d43");p1
+
+            
+p2 <- ggplot(olympics12, aes(x=log(population), y=log(medals))) +
+               geom_point(col="#f46d43");p2
+
+p3 <- ggplot(olympics12, aes(x=athletes, y=medals)) +
+              geom_point(col="#f46d43"); p3
+
+#We can see from the plots that there is a positive association between log(medals) and log(GDPpercapita); log(medals) and log(population) and log(medals) and log(athletes);
+
+p4 <- ggplot(olympics12) +
+  geom_boxplot(aes(x=host, y=medals)); p4
+
+#We can see from the plot that the median number of medals won by countries who didn't host the Olympics lies below the median number of medals won by the countries who are/were/will be hosts.
+
+p5 <- ggplot(olympics12) +
+  geom_boxplot(aes(x=oneparty, y=medals)); p5
+
+#We can see from the plot that the median number of medals won by countries which are not one-party states lies below the median number of medals won by countries ruled by a one-part system. However, this is not necessarily relevant, due to the fact that there are only 3 countries with this type of political system, one of them being China, which supplied a very high population and has supplied a very high number of athletes.
+
+#GLM 1
+model.poisson <- glm(medals ~ log(GDPpercapita) + log(population) + athletes + soviet + comm + muslim +
+                oneparty + host + altitude, family = poisson, data = olympics12); summary(model.poisson)
+qchisq(df=98, p=0.95)
+#The residual deviance is much larger than X^2. This could be due to the presence of outliers, zero-inflation or possibly overdispersion in the data. 
+
+resp <- resid(model.pois, type = "pearson")
+resd <- resid(model.pois, type = "deviance")
+p6<- ggplot(model.pois, aes(sample = resp)) + geom_point(stat = "qq", color = "#7fc97f") +
+ylab("Pearson residuals")
+p7<- ggplot(model.pois, aes(sample = resd)) + geom_point(stat = "qq", color = "#7fc97f") +
+ylab("Deviance residuals")
+p8<- ggplot(model.poisson, aes(x = predict(model.pois, type="link"), y =resd))+
+geom_point(col = "#7fc97f") +
+ylab("Deviance residuals") + xlab("Linear predictor")
+grid.arrange(p6, p7, p8, nrow = 1)
+
+#The Pearson residuals curve slightly beyond the line, however the QQ plot for the deviance residuals looks good. The deviance residuals plotted against the linear predictor shows a pattern in the data, pointing towards nonlinearity.
+
+dp.plot <- ggplot(model.pois, aes(x=log(fitted(model.pois)), y=log((olympics12$medals-fitted(model.pois))^2)))+
+geom_point(col="#f46d43") +
+geom_abline(slope=1, intercept=0, col="#a6d96a", size=1) +
+ylab(expression((y-hat(mu))^2)) + xlab(expression(hat(mu)))
+
+X2 <- sum(resid(model.pois, type = "pearson")^2)
+dp <- X2 / model.pois$df.res; dp
+
+
+#Variable selection
+#We will use an F test to determine the significance of the regression coefficients.
+model2 <- glm(medals ~ log(GDPpercapita) + log(population) + athletes + comm
+                  + host + muslim, family = quasipoisson, data = olympics12); summary(model2)
+
+drop1(model2, test= "F")
+
+#dropping soviet
+
+model2 <- glm(medals ~ log(GDPpercapita) + log(population) + athletes + comm + muslim +
+                oneparty + host + altitude, family = quasipoisson, data = olympics12)
+drop1(model2, test= "F")
+
+#dropping oneparty
+
+model2  <-  glm(medals ~ log(GDPpercapita) + log(population) + athletes + comm + muslim
+               + host + altitude, family = quasipoisson, data = olympics12)
+drop1(model2, test = "F")
+
+#dropping altitude
+
+model2 <-  glm(medals ~ log(GDPpercapita) + log(population) + athletes + comm + muslim
+               + host, family = quasipoisson, data = olympics12)
+drop1(model2, test = "F")
+
+#dropping muslim
+
+GLM2 <-  glm(medals ~ log(GDPpercapita) + log(population) + athletes + comm + host, 
+               family = quasipoisson, data = olympics12); summary(GLM2)
+drop1(GLM2, test = "F")
+
+qchisq(df=102, p=0.95)
+
+#All terms appear significant now, however the residual deviance is much larger than X^2. This is possibly due to the excess zeros in our response variable or due to lack of fit of the model. 
+
+#GLM 2
+
+model2 <- lm(medals ~ log(GDPpercapita) + log(population) + athletes + soviet + comm + muslim 
+             + host + altitude + oneparty, data = olympics12); summary(model2)
+
+outlierTest(model2) 
+#China and US are outliers. However, since they are both genuine observations I will not remove them.
+
+#Variable selection
+
+variables <- step(model2, direction = "both") 
+#athletes and oneparty are the most relevant variables, however we have seen previously that oneparty that there are only 3 countries with this type of political system, with China - an outlier - being one of them. Therefore, I will remove the variable from the model and re-run the variable selection process. 
+
+model3 <- lm(medals ~ log(GDPpercapita) + log(population) + athletes + soviet + comm + muslim 
+             + host + altitude, data = olympics12); summary(model3)
+
+variables2 <- step(model3, direction = "both") 
+
+GLM1 <- lm(medals ~ log(GDPpercapita) + athletes + oneparty, data = olympics12); summary(GLM1)
+
+#Adjusted R-squared is 0.7966, which means that log(GDPpercapita) and athletes explain almost 80% of the variablility in our data.
+
+par(mfrow=c(2,2))      
+plot(GLM2)      
+par(mfrow=c(1,1)) 
+
+#The residuals vs fitted plot shows that the mean of errors is not zero, meaning the model doesn't accurately capture deterministic part of the data. Also, the residuals appear clustered, and we have potential heteroscedascity. In conclusion, the linear model might not be suitable for our data.
+
+
+#Traininig the model
+
+GLM2 <-  glm(medals ~ log(GDPpercapita) + log(population) + athletes + comm + host, 
+             family = quasipoisson, data = training.data); summary(GLM2)
+
+GLM1 <- lm(medals ~ log(GDPpercapita) + athletes, data = training.data); summary(GLM1)
+
+#Since the p-values for athletes and log(GDPpercapita) are lower than 0.05, we conclude that there is a statistically significant relationship between the two variables and our response variable, medals.
+#Log(GDPpercapita) appears to have a negative impact on the number of medals won: for every one unit increase in log(GDPpercapita), the number of medals decreases by -0.973 on average. On the other hand, for every unit increase in athletes, the number of medals won increases by 0.128.
+
+
+expected_medals1 <- round(predict(GLM1, newdata= olympics16, type = "response"))
+pred1 <- cbind(olympics16[,c(1,8)], expected_medals1); pred1
+
+expected_medals2 <- round(predict(GLM2, newdata= olympics16, type = "response"))
+pred2 <- cbind(olympics16[,c(1,8)], expected_medals2)
+pred2[pred2<0] <- 0; pred2
+
+test.glm <- function(fit) 
+  sqrt(sum(((olympics16$medals) - predict(fit, newdata = olympics16, type = 'response'))^2)/108)
+
+test.glm(GLM1)
+test.glm(GLM2)
+
+test.glm <- function(fit) 
+  sqrt(sum((predict(fit, newdata = olympics16, type = 'response') - (olympics16$medals))^2)/108)
+
+test.glm(GLM1)
+test.glm(GLM2)
+
+
